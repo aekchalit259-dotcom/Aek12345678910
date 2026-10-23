@@ -1,0 +1,237 @@
+local SolarisLib = loadstring(game:HttpGet("https://solarishub.dev/SolarisLib.lua"))()
+
+-- บริการพื้นฐานของ Roblox
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- ตัวแปรเก็บสถานะการตั้งค่า
+local Settings = {
+    BigBall = false,
+    BallSize = 1,
+    Hitbox = false,
+    HitboxSize = 1,
+    ESP = false,
+    AutoGoal = false,
+    WalkSpeedToggle = false,
+    WalkSpeed = 16,
+    FlyToggle = false,
+    FlySpeed = 50
+}
+
+-- ตัวแปรสำหรับระบบบิน
+local Flying = false
+local FlyBodyVelocity = nil
+local FlyBodyGyro = nil
+
+-- สร้างหน้าต่าง GUI
+local win = SolarisLib:New({
+    Name = "Blue Lock Rivals Hub",
+    FolderToSave = "BLR_SolarisConfig"
+})
+
+-- แถบเมนูหลัก
+local tabMain = win:Tab("ฟังก์ชันหลัก")
+local tabMovement = win:Tab("การเคลื่อนที่")
+
+--- =============================================
+--- แท็บที่ 1: ฟังก์ชันหลัก (Main Features)
+--- =============================================
+local secBall = tabMain:Section("ระบบลูกบอล & ฮิตบ็อกซ์")
+
+-- ฟังก์ชันปรับขนาดบอล (Big Ball)
+secBall:Toggle("เปิดใช้งาน ขยายขนาดบอล", false, "ToggleBigBall", function(state)
+    Settings.BigBall = state
+end)
+
+secBall:Slider("ขนาดลูกบอล (1 - 10)", 1, 10, 1, 1, "SliderBallSize", function(val)
+    Settings.BallSize = val
+end)
+
+-- ฟังก์ชันปรับขนาด Hitbox
+secBall:Toggle("เปิดใช้งาน ขยาย Hitbox ตัวละคร", false, "ToggleHitbox", function(state)
+    Settings.Hitbox = state
+end)
+
+secBall:Slider("ขนาด Hitbox (1 - 10)", 1, 10, 1, 1, "SliderHitboxSize", function(val)
+    Settings.HitboxSize = val
+end)
+
+local secVisual = tabMain:Section("ระบบการมองเห็น")
+
+-- ฟังก์ชัน ESP สีรุ้ง
+secVisual:Toggle("เปิดใช้งาน ESP ผู้เล่น (สีรุ้ง)", false, "ToggleESP", function(state)
+    Settings.ESP = state
+end)
+
+local secAutomation = tabMain:Section("ระบบอัตโนมัติ")
+
+-- ฟังก์ชัน Auto Goal
+secAutomation:Toggle("เปิดใช้งาน ยิงประตูอัตโนมัติ (Auto Goal)", false, "ToggleAutoGoal", function(state)
+    Settings.AutoGoal = state
+end)
+
+--- =============================================
+--- แท็บที่ 2: การเคลื่อนที่ (Movement Features)
+--- =============================================
+local secMove = tabMovement:Section("การปรับแต่งการเคลื่อนที่")
+
+-- ฟังก์ชันวิ่งเร็ว
+secMove:Toggle("เปิดใช้งาน ความเร็วการเดิน", false, "ToggleSpeed", function(state)
+    Settings.WalkSpeedToggle = state
+end)
+
+secMove:Slider("ปรับความเร็ววิ่ง (1 - 100)", 1, 100, 16, 1, "SliderSpeed", function(val)
+    Settings.WalkSpeed = val
+end)
+
+-- ฟังก์ชันบิน
+secMove:Toggle("เปิดใช้งาน ระบบบิน", false, "ToggleFly", function(state)
+    Settings.FlyToggle = state
+    
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    local hrp = character.HumanoidRootPart
+
+    if state then
+        -- เริ่มระบบบิน
+        FlyBodyVelocity = Instance.new("BodyVelocity")
+        FlyBodyVelocity.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+        FlyBodyVelocity.Velocity = Vector3.zero
+        FlyBodyVelocity.Parent = hrp
+
+        FlyBodyGyro = Instance.new("BodyGyro")
+        FlyBodyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+        FlyBodyGyro.CFrame = hrp.CFrame
+        FlyBodyGyro.Parent = hrp
+    else
+        -- ยกเลิกระบบบิน
+        if FlyBodyVelocity then FlyBodyVelocity:Destroy() end
+        if FlyBodyGyro then FlyBodyGyro:Destroy() end
+    end
+end)
+
+secMove:Slider("ปรับความเร็วการบิน (1 - 100)", 1, 100, 50, 1, "SliderFlySpeed", function(val)
+    Settings.FlySpeed = val
+end)
+
+--- =============================================
+--- ลูปประมวลผลหลัก (Main Logic Loop)
+--- =============================================
+
+-- ค้นหาวัตถุลูกบอลใน Workspace
+local function GetFootball()
+    for _, obj in pairs(Workspace:GetChildren()) do
+        if obj.Name:lower():find("ball") or obj.Name:lower():find("football") then
+            if obj:IsA("BasePart") then
+                return obj
+            end
+        end
+    end
+    return nil
+end
+
+-- ตรวจสอบว่ามีผู้เล่นครอบครองบอลอยู่หรือไม่
+local function IsBallHeld(ball)
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local hrp = player.Character:FindFirstChild("HumanoidRootPart")
+            if hrp and (hrp.Position - ball.Position).Magnitude < 5 then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- RenderStepped สำหรับอัปเดตระบบบิน, ESP และการเดิน
+RunService.RenderStepped:Connect(function()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+
+    -- ปรับความเร็ววิ่ง
+    if humanoid and Settings.WalkSpeedToggle then
+        humanoid.WalkSpeed = Settings.WalkSpeed
+    end
+
+    -- ระบบบิน
+    if Settings.FlyToggle and hrp and FlyBodyVelocity and FlyBodyGyro then
+        local moveDir = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+
+        FlyBodyVelocity.Velocity = moveDir * Settings.FlySpeed
+        FlyBodyGyro.CFrame = Camera.CFrame
+    end
+
+    -- ระบบ ESP สีรุ้ง
+    local rainbowColor = Color3.fromHSV((tick() % 5) / 5, 1, 1)
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local highlight = player.Character:FindFirstChild("ESPHighlight")
+            if Settings.ESP then
+                if not highlight then
+                    highlight = Instance.new("Highlight")
+                    highlight.Name = "ESPHighlight"
+                    highlight.Parent = player.Character
+                end
+                highlight.FillColor = rainbowColor
+                highlight.OutlineColor = rainbowColor
+                highlight.Enabled = true
+            else
+                if highlight then
+                    highlight.Enabled = false
+                end
+            end
+        end
+    end
+
+    -- ปรับขนาด Hitbox
+    if Settings.Hitbox then
+        for _, player in pairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                local targetHRP = player.Character.HumanoidRootPart
+                targetHRP.Size = Vector3.new(Settings.HitboxSize, Settings.HitboxSize, Settings.HitboxSize)
+                targetHRP.Transparency = 0.7
+                targetHRP.CanCollide = false
+            end
+        end
+    end
+end)
+
+-- Heartbeat สำหรับจัดการลูกบอลและ Auto Goal
+RunService.Heartbeat:Connect(function()
+    local ball = GetFootball()
+    if not ball then return end
+
+    -- ปรับขนาดลูกบอล
+    if Settings.BigBall then
+        ball.Size = Vector3.new(Settings.BallSize, Settings.BallSize, Settings.BallSize)
+    end
+
+    -- ระบบ Auto Goal
+    if Settings.AutoGoal then
+        local isHeld = IsBallHeld(ball)
+        local isStopped = ball.Velocity.Magnitude < 1
+        
+        -- วาร์ปไปหาบอลเมื่อบอลหยุดนิ่งและไม่มีใครถืออยู่เท่านั้น
+        if isStopped and not isHeld then
+            local character = LocalPlayer.Character
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                character.HumanoidRootPart.CFrame = ball.CFrame + Vector3.new(0, 2, 0)
+            end
+        end
+    end
+end)
+
+SolarisLib:Notification("สำเร็จ", "โหลดสคริปต์ภาษาไทยเรียบร้อยแล้ว")
